@@ -5,6 +5,7 @@ import { Dialog } from '/utils/Dialog';
 import { copyScriptToServer } from '/utils/file';
 import { Averager } from 'utils/Averager';
 import { getNextAvailablePort } from '/utils/portAlloc';
+import { CustomLogger } from '../utils/customLogger';
 
 interface ITimestampedMessage<T extends string | number> {
   message: T;
@@ -31,6 +32,7 @@ const HACK_FILE = 'scheduler/hacks/hack.js';
  * - Get Act. $ + xp / sec working
  */
 class Scheduler {
+  logger: CustomLogger;
   // Ports
   portData: IPortData = {};
   
@@ -200,12 +202,14 @@ class Scheduler {
     protected host: string,
     protected dialog: Dialog
   ) {
+    this.logger = new CustomLogger(ns, 'INFO', ns.tprint);
+
     const selfScript = ns.getRunningScript();
     this.HACK_PORT = getNextAvailablePort(ns, selfScript!.pid);
     this.GROW_PORT = getNextAvailablePort(ns, selfScript!.pid);
     this.WEAKEN_PORT = getNextAvailablePort(ns, selfScript!.pid);
 
-    this.debug(`Hack Port: ${this.HACK_PORT} | Grow Port: ${this.GROW_PORT} | Weaken Port: ${this.WEAKEN_PORT}`);
+    this.logger.debug(`Hack Port: ${this.HACK_PORT} | Grow Port: ${this.GROW_PORT} | Weaken Port: ${this.WEAKEN_PORT}`);
 
     this.loopOverPorts((port) => {
       this.portData[port] = {message: 0, time: Date.now()};
@@ -244,14 +248,14 @@ class Scheduler {
     let loopLimiter = 0;
     while (this.totalRamSum < this.utilizationLowerBound || this.totalRamSum > this.utilizationUpperBound) {
       if (loopLimiter > 100) {
-        this.error(`Memory solver couldn't find solution in 100 iterations. Quitting solver!`);
+        this.logger.error(`Memory solver couldn't find solution in 100 iterations. Quitting solver!`);
         // ns.exit();
         break;
       } else {
         loopLimiter++;
       }
       
-      this.debug(`RAM estimation (${formatRAM(this.totalRamSum)}) not in bounds (${formatRAM(this.utilizationLowerBound)} - ${formatRAM(this.utilizationUpperBound)}). Tweaking Hack Duration Multi (Currently: ${this.hackDurationMultiplier.toPrecision(2)}x)`);
+      this.logger.debug(`RAM estimation (${formatRAM(this.totalRamSum)}) not in bounds (${formatRAM(this.utilizationLowerBound)} - ${formatRAM(this.utilizationUpperBound)}). Tweaking Hack Duration Multi (Currently: ${this.hackDurationMultiplier.toPrecision(2)}x)`);
       
       this.adjustMultipliers();
       
@@ -265,7 +269,7 @@ class Scheduler {
       this.calculateRamUsage();
     }
     
-    this.debug(`threads on start: hack: ${this.hackThreads.average} grow: ${this.growThreads.average} weaken: ${this.weakenThreads.average} RAM: ${formatRAM(this.totalRamSum)} ${formatPct(this.totalRamSum / this.RAM_LIMIT)}`);
+    this.logger.debug(`threads on start: hack: ${this.hackThreads.average} grow: ${this.growThreads.average} weaken: ${this.weakenThreads.average} RAM: ${formatRAM(this.totalRamSum)} ${formatPct(this.totalRamSum / this.RAM_LIMIT)}`);
     
     let lastMessage: ITimestampedMessage<string> = {
       message: '',
@@ -310,11 +314,11 @@ class Scheduler {
       
       // Start hack threads
       // Allow the first round of grow's to resolve, before starting hack threads
-      // this.debug(`${this.timer} Hack Launch: timer ${this.timer % Math.floor(this.secondsPerHack) == 0} | startup ${this.timer > this.growTimeS} | has threads ${this.hackThreads.average > 0}`)
+      // this.logger.debug(`${this.timer} Hack Launch: timer ${this.timer % Math.floor(this.secondsPerHack) == 0} | startup ${this.timer > this.growTimeS} | has threads ${this.hackThreads.average > 0}`)
       if (this.timer % Math.floor(this.secondsPerHack) == 0 && this.timer > this.growTimeS && this.hackThreads.average > 0) {
         const pid = this.ns.exec(HACK_FILE, this.host, Math.ceil(this.hackThreads.average), this.target, this.HACK_PORT);
         if (pid == 0) {
-          this.warn(`Hack file with ${this.hackThreads} threads failed to start (Host: ${formatRAM(this.hostAvailableRamPct)} ; script: ${this.hackThreads.average * this.scriptRam[HACK_FILE]})`);
+          this.logger.warn(`Hack file with ${this.hackThreads} threads failed to start (Host: ${formatRAM(this.hostAvailableRamPct)} ; script: ${this.hackThreads.average * this.scriptRam[HACK_FILE]})`);
         }
         this.scriptPids[HACK_FILE].push(pid);
         lastMessage = { message: `Executing Hack with ${this.hackThreads} threads`, time: Date.now()};
@@ -335,7 +339,7 @@ class Scheduler {
       }
       
       this.calculateRamUsage();
-      // this.debug(`Est. Ram Usage: ${formatPct(this.totalRamSum / this.RAM_LIMIT)} ${(this.totalRamSum / this.RAM_LIMIT) < this.ESTIMATION_LOWER_BOUND} | Act. Available Ram: ${formatPct(this.hostAvailableRamPct)} ${this.hostAvailableRamPct > this.ESTIMATION_LOWER_BOUND} | timer: ${(this.timer - this.timeAtLastAdjust)} ${(this.timer - this.timeAtLastAdjust) > this.secondsPerGrow} `)
+      // this.logger.debug(`Est. Ram Usage: ${formatPct(this.totalRamSum / this.RAM_LIMIT)} ${(this.totalRamSum / this.RAM_LIMIT) < this.ESTIMATION_LOWER_BOUND} | Act. Available Ram: ${formatPct(this.hostAvailableRamPct)} ${this.hostAvailableRamPct > this.ESTIMATION_LOWER_BOUND} | timer: ${(this.timer - this.timeAtLastAdjust)} ${(this.timer - this.timeAtLastAdjust) > this.secondsPerGrow} `)
       this.checkIfShouldAdjustMultiplers();
       
       
@@ -371,7 +375,7 @@ class Scheduler {
       this.adjustMultipliers();
 
       this.timeAtLastAdjust = this.timer;
-      this.info(`${this.host} - Adjusting hack multipliers on ${this.target}`);
+      this.logger.info(`${this.host} - Adjusting hack multipliers on ${this.target}`);
 
       this.getSecondsPerIts();
       loopOverScriptFiles(script => this.loopThreads[script].reset());
@@ -384,12 +388,12 @@ class Scheduler {
     if (this.secondsPerGrow > 2 && this.secondsPerWeaken > 2 || this.hackDurationMultiplier > 1) {
       this.hackDurationMultiplier += this.hackDurationMultiplier * ((this.totalRamSum - (this.utilizationUpperBound / 2)) / this.totalRamSum) * 0.01 ;
     } else {
-      this.debug(`Can't lower secondsPerGrow or secondsPerWeaken. Tweaking Hack % (Currently: ${formatPct(this.hackTargetPerc)})`);
+      this.logger.debug(`Can't lower secondsPerGrow or secondsPerWeaken. Tweaking Hack % (Currently: ${formatPct(this.hackTargetPerc)})`);
 
       this.hackTargetPerc += 0.0015 * multi;
 
       if (this.hackTargetPerc < 0.001) {
-        this.error(`Hack target % below 0.1%. Quitting`);
+        this.logger.error(`Hack target % below 0.1%. Quitting`);
         this.ns.exit();
       }
     }
@@ -454,12 +458,12 @@ class Scheduler {
     const hackTimeS = this.hackTimeS * this.hackDurationMultiplier;
     this.secondsPerHack = Math.max(hackTimeS, 1); // Minium of hack every second
     if (this.secondsPerHack === 1) {
-      this.warn(`secondsPerHack for ${this.target} has been capped to lowest possible value (1s)`);
+      this.logger.warn(`secondsPerHack for ${this.target} has been capped to lowest possible value (1s)`);
     }
     this.secondsPerGrow = Math.max(this.secondsPerHack / (this.growTimeS / this.secondsPerHack), 1);
     this.secondsPerWeaken = Math.max(this.secondsPerHack / (this.weakenTimeS / this.secondsPerHack), 1);
 
-    // this.debug(`Timing: Hack: ${formatMilliseconds(this.secondsPerHack * 1000, true)} Grow: ${formatMilliseconds(this.secondsPerGrow * 1000, true)} Weaken: ${formatMilliseconds(this.secondsPerWeaken * 1000, true)} multi: ${this.hackDurationMultiplier.toPrecision(2)}x`);
+    this.logger.debug(`Timing: Hack: ${formatMilliseconds(this.secondsPerHack * 1000, true)} Grow: ${formatMilliseconds(this.secondsPerGrow * 1000, true)} Weaken: ${formatMilliseconds(this.secondsPerWeaken * 1000, true)} multi: ${this.hackDurationMultiplier.toPrecision(2)}x`);
   }
 
   getWeakenThreads() {
@@ -483,19 +487,19 @@ class Scheduler {
     
     this.growThreads.updateAverage(growThreads);
 
-    // this.debug(`Grow Threads: ${growThreads} Grow Threads Avg: ${Math.ceil(this.growThreads.average)} Growth Target: ${formatPct(this.growthTarget, 3)} adjustedHack: ${formatPct(adjustedHackPerc)} safety: ${formatPct(growthSafteyAddition, 3)} target money: ${formatPct(targetsMoneyPerc, 3)}`)
+    this.logger.debug(`Grow Threads: ${growThreads} Grow Threads Avg: ${Math.ceil(this.growThreads.average)} Growth Target: ${formatPct(this.growthTarget, 3)} adjustedHack: ${formatPct(adjustedHackPerc)} safety: ${formatPct(growthSafteyAddition, 3)} target money: ${formatPct(targetsMoneyPerc, 3)}`)
   }
 
   getHackThreads() {
     this.hackTargetDollars = this.maxMoneyThresh * this.hackTargetPerc;
 
-    // this.debug(`Hack Threads:  tgt $:${formatCurrency(this.hackTargetDollars)} | thread result: ${this.ns.hackAnalyzeThreads(this.target, this.hackTargetDollars).toFixed(2)} | analyze result: ${formatPct(this.ns.hackAnalyze(this.target) * Math.ceil(this.ns.hackAnalyzeThreads(this.target, this.hackTargetDollars)))}`)
+    this.logger.debug(`Hack Threads:  tgt $:${formatCurrency(this.hackTargetDollars)} | thread result: ${this.ns.hackAnalyzeThreads(this.target, this.hackTargetDollars).toFixed(2)} | analyze result: ${formatPct(this.ns.hackAnalyze(this.target) * Math.ceil(this.ns.hackAnalyzeThreads(this.target, this.hackTargetDollars)))}`)
     const hackThreads = Math.ceil(this.ns.hackAnalyzeThreads(this.target, this.hackTargetDollars));
 
     // const hackThreads = Math.ceil(this.hackTargetPerc / this.ns.hackAnalyze(this.target));
     this.hackThreads.updateAverage(hackThreads);
 
-    // this.debug(`Hack Threads: tgt: ${formatPct(this.hackTargetPerc)} | 1 thread: ${formatPct(this.ns.hackAnalyze(this.target))} | threads: ${(this.hackTargetPerc / this.ns.hackAnalyze(this.target)).toPrecision(3)}`)
+    // this.logger.debug(`Hack Threads: tgt: ${formatPct(this.hackTargetPerc)} | 1 thread: ${formatPct(this.ns.hackAnalyze(this.target))} | threads: ${(this.hackTargetPerc / this.ns.hackAnalyze(this.target)).toPrecision(3)}`)
     
     this.currMoney = this.ns.getServerMoneyAvailable(this.target);
     if ((this.currMoney / this.maxMoneyThresh) < 0.60) {
@@ -596,15 +600,15 @@ class Scheduler {
     let its = 0;
     while (estThreads != avgThreads && avgThreads > 0) {
       if (its > 100) {
-        this.warn(`Grow threads not converging, est: ${estThreads} threads | avg: ${avgThreads} threads | est ${formatPct(estGrowthTarget, 5)} | live: ${formatPct(this.growthTarget, 5)}`);
+        this.logger.warn(`Grow threads not converging, est: ${estThreads} threads | avg: ${avgThreads} threads | est ${formatPct(estGrowthTarget, 5)} | live: ${formatPct(this.growthTarget, 5)}`);
         break;
       }
 
-      // this.debug(`Grow Estimator: pre: ${formatPct(estGrowthTarget, 3)} post:${formatPct(estGrowthTarget + 0.001 * (estThreads - avgThreads), 3)} tgt: ${formatPct(this.growthTarget, 3)} | est: ${estThreads} threads | avg: ${avgThreads} threads | i: ${its}`);
+      this.logger.debug(`Grow Estimator: pre: ${formatPct(estGrowthTarget, 3)} post:${formatPct(estGrowthTarget + 0.001 * (estThreads - avgThreads), 3)} tgt: ${formatPct(this.growthTarget, 3)} | est: ${estThreads} threads | avg: ${avgThreads} threads | i: ${its}`);
 
       estGrowthTarget += 0.001 * Math.max(Math.min(avgThreads - estThreads, 10), -10);
       if (estGrowthTarget < 1) {
-        this.warn(`Grow Estimator: Tried to calcaulate value less than 1 ${formatPct(estGrowthTarget, 3)} | i ${its} | est threads: ${estThreads} | avg threads: ${avgThreads}`);
+        this.logger.warn(`Grow Estimator: Tried to calcaulate value less than 1 ${formatPct(estGrowthTarget, 3)} | i ${its} | est threads: ${estThreads} | avg threads: ${avgThreads}`);
         break;
       }
       estThreads = Math.ceil(this.ns.growthAnalyze(this.target, estGrowthTarget));
@@ -623,7 +627,7 @@ class Scheduler {
   private formatHack(): string | undefined {
     const liveData = `${formatCurrency(this.hackTargetDollars)} - ${this.hackThreads.lastValue.toFixed(0)} threads`;
 
-    // this.debug(`Hack Estimator: hack %: ${formatPct(this.ns.hackAnalyze(this.target) * Math.ceil(this.hackThreads.average), 3)} | MaxThresh: ${formatCurrency(this.maxMoneyThresh)} | out: ${formatCurrency((this.ns.hackAnalyze(this.target) * Math.ceil(this.hackThreads.average)) * this.maxMoneyThresh)} | 1 thread: ${formatPct(this.ns.hackAnalyze(this.target))}`);
+    this.logger.debug(`Hack Estimator: hack %: ${formatPct(this.ns.hackAnalyze(this.target) * Math.ceil(this.hackThreads.average), 3)} | MaxThresh: ${formatCurrency(this.maxMoneyThresh)} | out: ${formatCurrency((this.ns.hackAnalyze(this.target) * Math.ceil(this.hackThreads.average)) * this.maxMoneyThresh)} | 1 thread: ${formatPct(this.ns.hackAnalyze(this.target))}`);
 
     const averagedData = `${formatCurrency((this.ns.hackAnalyze(this.target) * Math.ceil(this.hackThreads.average)) * this.maxMoneyThresh)} - ${Math.ceil(this.hackThreads.average).toFixed(0)} threads`
     if (liveData === averagedData) {
@@ -645,7 +649,7 @@ class Scheduler {
   }
 
   startScript(secondsPerIt: number, script: string, port: number, threads: Averager) {
-    // this.debug(`${this.timer} ${script} launch: timer: ${this.timer % Math.floor(secondsPerIt) == 0}`)
+    this.logger.debug(`${this.timer} ${script} launch: timer: ${this.timer % Math.floor(secondsPerIt) == 0}`)
     if (this.timer % Math.floor(secondsPerIt) == 0) {
       const { pid, msg } = this.execScript(Math.ceil(threads.average), script, port);
 
@@ -660,7 +664,7 @@ class Scheduler {
   }
   
   execScript(threads: number, script: string, port: number) {
-    // this.debug(`Executing script: ${script}`)
+    this.logger.debug(`Executing script: ${script}`)
     const pid = this.ns.exec(script, this.host, threads, this.target, port);
     return {pid, msg: { message: `Executing ${script} with ${threads} threads`, time: Date.now() }};
   }
@@ -675,23 +679,7 @@ class Scheduler {
   // Loggers
   logScriptFailedToStart(script: string, threads: number) {
     threads = Math.ceil(threads);
-    this.warn(`Script ${script} with ${threads} threads failed to start (${this.host}: ${formatRAM(this.hostAvailableRam)}; script: ${formatRAM(threads * this.scriptRam[script])})`)
-  }
-
-  warn(message: string) {
-    this.ns.tprint(`WARN: ${message}`);
-  }
-  
-  info(message: string){
-    this.ns.tprint(`INFO: ${message}`);
-  }
-
-  error(message: string) {
-    this.ns.tprint(`ERROR: ${message}`);
-  }
-
-  debug(message: string) {
-    this.ns.tprint(`DEBUG: ${message}`);
+    this.logger.warn(`Script ${script} with ${threads} threads failed to start (${this.host}: ${formatRAM(this.hostAvailableRam)}; script: ${formatRAM(threads * this.scriptRam[script])})`)
   }
 }
     
