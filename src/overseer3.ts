@@ -2,20 +2,18 @@ import { NS } from "@ns";
 import { CustomLogger } from "./utils/customLogger";
 import { copyScriptToServer, readFile } from "./utils/file";
 import { formatCurrency, formatMilliseconds, formatPct, formatRAM } from "./utils/utils";
-import { Dialog } from "./utils/Dialog";
 import { ITableHeader, formatTable } from "./utils/tableUtils";
 import { getServerMoneyString, getServerSecurityLevelString } from "./utils/dashboard";
-import { Colours, RESET } from "./enums/Colours";
 
 const HACK_TARGETS_FILE = 'db/spider/hack_targets.txt';
 const HOSTS_FILE = 'db/spider/hosts.txt';
 
 enum AttackPhase {
-    Weaken = `${Colours.RED}Weaken${RESET}`,
-    Grow = `${Colours.BRIGHT_GREEN}Grow${RESET}`,
-    Pending = `${Colours.YELLOW}Pending${RESET}`,
-    Hack = `${Colours.BRIGHT_MAGENTA}Hack${RESET}`,
-    Done = `${Colours.BLUE}Done${RESET}`,
+    Weaken = `Weaken`,
+    Grow = `Grow`,
+    Pending = `Pending`,
+    Hack = `Hack`,
+    Done = `Done`,
 }
 
 interface ITargetData {
@@ -31,7 +29,7 @@ interface ITargetData {
 }
 
 interface IOverseerOptions {
-    reservedHosts: string[];
+    excludedHosts: string[];
     killAll: boolean;
     growthTargetPct: number;
     hackTargetPct: number;
@@ -109,9 +107,14 @@ export class Overseer {
         protected opts: Partial<IOverseerOptions>,
         protected logger: CustomLogger = new CustomLogger(ns, 'WARN'),
     ) {
+        this.logger.debug(`Overseer - Options: ${JSON.stringify(opts)}`);
         this.targets = readFile(ns, HACK_TARGETS_FILE);
         this.logger.debug(`Overseer - Targets: ${this.targets} (${this.targets.length})`);
         this.hosts = readFile(ns, HOSTS_FILE);
+        if (opts.excludedHosts) {
+            this.logger.debug(`Overseer - Reserved Hosts: ${opts.excludedHosts}`);
+            this.hosts = this.hosts.filter(h => !opts.excludedHosts!.includes(h));
+        }
         this.logger.debug(`Overseer - Hosts: ${this.hosts} (${this.hosts.length})`);
 
         this.weakenScriptRam = ns.getScriptRam(this.weakenFile, 'home');
@@ -359,6 +362,7 @@ export class Overseer {
             const threadsToAlloc = Math.min(threads, localThreads);
 
             copyScriptToServer(this.ns, host, script);
+            this.logger.debug(`Overseer - Allocating ${threadsToAlloc} threads of ${script} to ${host} (${formatRAM(ram)} spare) | Remaining threads: ${threads - threadsToAlloc}`);
             const pid = this.ns.exec(script, host, threadsToAlloc, target.name, ...args);
             if (!pid) {
                 this.logger.error(`Overseer - Could not execute ${script} on ${host} with ${formatRAM(ram)} spare, script tried allocating ${threadsToAlloc} threads (${formatRAM(threadsToAlloc * this.ns.getScriptRam(script))})`);
@@ -487,7 +491,7 @@ export class Overseer {
 
     killAllScripts() {
         // const usedPservs = new Array(5).fill('').map((_, i) => `pserv-${i + 20}`);
-        const reservedHostsSet = new Set(this.opts.reservedHosts ?? ['home']);
+        const reservedHostsSet = new Set(this.opts.excludedHosts ?? ['home']);
         this.hosts.forEach(host => {
             if (!reservedHostsSet.has(host)) {
                 this.logger.info(`Overseer - Killing all scripts on ${host}`);
@@ -528,8 +532,11 @@ export async function main(ns:NS) {
     if (opts.hackTargetPct && opts.hackTargetPct as number < 0) {
         throw new Error(`Hack target pct must be >= 0. Got ${opts.hackTargetPct}`);
     }
-    const logger = new CustomLogger(ns, 'DEBUG', ns.tprint);
-    const overseer = new Overseer(ns, opts as IOverseerOptions, logger);
+    // const logger = new CustomLogger(ns, 'DEBUG', 'tprint');
+    // const overseer = new Overseer(ns, opts as IOverseerOptions, logger);
+    
+    const overseer = new Overseer(ns, opts as IOverseerOptions);
+
     
     await overseer.run();
 }

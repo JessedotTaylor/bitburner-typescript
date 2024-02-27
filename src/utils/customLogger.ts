@@ -5,7 +5,7 @@ export class CustomLogger {
   constructor(
     protected ns: NS,
     protected logLevel: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' = 'DEBUG',
-    protected printFn: (... args: any[]) => void = ns.print
+    protected printFnName: 'print' | 'tprint' = 'print'
   ) {
       
   }
@@ -31,6 +31,15 @@ export class CustomLogger {
   debug(message: string, ...args: any[]) {
     if (this.isLevelAboveLogLevel('DEBUG')) {
       this.printFn(`DEBUG: ${message} ${args}`);
+    }
+  }
+
+  private get printFn(): (...args:any[]) => void {
+    switch (this.printFnName) {
+      case 'print':
+        return this.ns.print;
+      case 'tprint':
+        return this.ns.tprint;
     }
   }
 
