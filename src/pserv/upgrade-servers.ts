@@ -3,19 +3,13 @@ import { calculateThreads, formatCurrency, validateArg } from 'utils/utils';
 
 /** @param {NS} ns */
 export async function main(ns: NS) {
-  // let ram = 16;
-  // let i = 0;
+  let ram = validateArg<number>(ns, ns.args[0] || 128, 'number');
 
-  // while (ram < 1048576 && i < 100) {
-  //   const cost = ns.getPurchasedServerUpgradeCost('pserv-0', ram);
-  //   ns.upgradePurchasedServer('pserv-0', )
-  //   ns.tprint(`${ram} GB: \$${cost / 1e6}m`);
-
-  //   ram = ram * 2;
-  //   ++i;
-  // }
-
-  const ram = validateArg<number>(ns, ns.args[0] || 128, 'number');
+  let canUpgrade = true;
+  if (ram >= 1048576) {
+    canUpgrade = false;
+    ram = 1048576;
+  }
 
   const file = "basic-hack.js";
 
@@ -33,8 +27,6 @@ export async function main(ns: NS) {
 
 
   const playerServers = Array(25).fill(0).map((_, i) => 'pserv-'+ i);
-  // playerServers.push('pserv-1-0');
-  // ns.print(playerServers);
 
   let i = 0;
 
@@ -43,16 +35,12 @@ export async function main(ns: NS) {
 
     if (ns.getServerMoneyAvailable('home') > ns.getPurchasedServerUpgradeCost(server, ram)) {
       ns.upgradePurchasedServer(server, ram);
-
-      // ns.scp(file, server);
-
-      // const threads = calculateThreads(ns, server, file);
-      // ns.exec(file, server, threads, "joesguns");
-      // // ns.exec("connect.js", server, undefined, "joesguns");
       ++i;
     }
 
     await ns.sleep(1000);
   }
 
+  // Automatically start the process of upgrading the pserv's to the next ram threshold
+  ns.exec('pserv/upgrade-servers.js', 'home', 1, ram * 4);
 }

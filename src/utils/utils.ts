@@ -119,3 +119,12 @@ export function formatRAM(ramGB: number): string {
   }
   return ramGB.toFixed(0);
 }
+/**
+ * Format an imput number as a percentage. 0 = 0%; 1 = 100%
+ * @param pct 
+ * @param precision 
+ * @returns 
+ */
+export function formatPct(pct: number, precision: number = 3): string {
+  return `${(pct * 100).toPrecision(precision)}%`
+}

@@ -1,3 +1,27 @@
+# Current TODOs:
+- [ ] Create Script Allocator util, to handle spawning scripts over multiple hosts
+ - Plug into Scheduler
+ - Plug into overseer
+- [x] Update heal server to  work based on growth %, rather than ram %
+- [x] Create a v3 overseer, with better multi-target support
+- [ ] Add automatic column width formatting to the table util
+- [ ] Fix issues in the scheduler causing estimations to not converge (Better value capping?)
+- [ ] Fix bug in scheduler where growth target is Infinity
+- [ ] Update Scheduler to use target averages, rather than live data
+- [ ] Update scheduler mem solver to use <power of ram available> its instead of 100
+- [ ] Update scheduler to use charts for ram usage etc
+- [ ] Check scheduler grow threads (Still seems to be spawning more than required for small targets)
+- [ ] Update scheduler to be smarter with script usage (Try re-use existing, and explicitly kill incorrect scripts)
+- [ ] Create a scheduler controller to spawn scheduler threads on top X targets
+- [ ] Add process to dashboard to copy .lit and .cct files to home
+- [ ] Add process to spider to auto backdoor servers?
+- [ ] Share Market?
+- [ ] HTML injection?
+- [ ] Create a 'startup' script that can manage the different boot phases
+
+# Current Game Objectives:
+- [x] Install all Augments from Bitrunners
+
 # Typescript template for Bitburner's Remote File API
 
 The official template for synchronizing Typescript/Javascript from your computer to the game.

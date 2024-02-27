@@ -19,12 +19,13 @@ export async function main(ns: NS) {
   
     while (i < ns.getPurchasedServerLimit()) {
       if (ns.getServerMoneyAvailable("home") > ns.getPurchasedServerCost(ram)) {
-        let hostname = ns.purchaseServer("pserv-" + i, ram);
-        // ns.scp("basic-hack.js", hostname);
-        // ns.exec("basic-hack.js", hostname, 13, "joesguns");
+        ns.purchaseServer("pserv-" + i, ram);
         ++i;
       }
   
       await ns.sleep(1000);
     }
+
+    // Automatically start the process of upgrading the pserv's to the next ram threshold
+    ns.exec('pserv/upgrade-servers.js', 'home', 1, ram * 4);
   }

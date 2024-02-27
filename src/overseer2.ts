@@ -2,14 +2,13 @@ import { NS } from '@ns';
 import { getServerHackingLevel } from './utils/dashboard';
 import { copyScriptToServer, readFile } from './utils/file';
 import { isServerBelowSecurityThresh } from './utils/hack';
-import { calculateThreads, formatCurrency, discoverServers, validateArg, formatMilliseconds } from './utils/utils';
+import { formatCurrency, formatMilliseconds } from './utils/utils';
 
 const THREAD_LIMIT = 100;
 
 
 /** @param {NS} ns */
 export async function main(ns: NS) {
-
   ns.disableLog('ALL');
 
   const hackTargetsFile = 'db/spider/hack_targets.txt';
@@ -35,7 +34,6 @@ export async function main(ns: NS) {
 
   const totalAvailableRam = hosts.map(s => ns.getServerMaxRam(s)).reduce((a, b) => a + b, 0);
 
-  // const pidMap = weakenTargets(ns, targets, hosts, )
 
   for (const target of targets) {
     if (!ns.hasRootAccess(target)) { // Dunno how we got here. Either the spider is broken, or manual data entry was incorrect
@@ -111,7 +109,7 @@ export async function main(ns: NS) {
 
     while (!isServerBelowSecurityThresh(ns, target)) {
       ns.print(`DEBUG: ${target} not under threshold. Sleeping (Sleep Time: ${formatMilliseconds((weakenTime - weakenAllocTime) / 2)})`);
-      await ns.sleep((weakenTime - weakenAllocTime) / 1.9);
+      await ns.sleep((weakenTime - weakenAllocTime) / 2.1);
     }
 
     // Cleanup weaken scripts
@@ -159,8 +157,6 @@ export async function main(ns: NS) {
     }
   }
 }
-
-
 
 function getServerRam(ns: NS, server: string) {
   // Host might already be running attacks for different targets

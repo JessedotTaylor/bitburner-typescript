@@ -1,13 +1,18 @@
 import { NS } from '@ns';
-import { validateArg } from './utils/utils';
+import { formatPct, formatRAM, validateArg } from 'utils/utils';
 
 export async function main(ns:NS) {
+    const host = 'home';
     const target = validateArg<string>(ns, ns.args[0], 'string');
-    const targets = [target];
-    // const targets = ['the-hub', 'computek', 'crush-fitness', 'johnson-ortho'];
+    let targets: string[] = [];
+    if (target.includes(',')) {
+        targets = target.split(',');
+    } else {
+        targets = [target];
+    }
 
-    const totalvailableRam = (ns.getServerMaxRam('home') - ns.getServerUsedRam('home')) * 0.75;
-    const availableRam = totalvailableRam / targets.length;
+    const totalvailableRam = (ns.getServerMaxRam(host) - ns.getServerUsedRam(host)) * 0.75;
+    let availableRam = totalvailableRam / targets.length;
 
     const weakenFile = "hacks/weaken.js";
     const weakenScriptRam = ns.getScriptRam(weakenFile, "home");
@@ -15,23 +20,31 @@ export async function main(ns:NS) {
     const growFile = "hacks/grow.js";
     const growScriptRam = ns.getScriptRam(growFile, "home");
 
-    const ramDivisions = Math.floor(availableRam / 7);
-
-    const weakenThreads = Math.floor(ramDivisions / weakenScriptRam);
-    const growThreads = Math.floor((ramDivisions * 6) / growScriptRam);
-
     const pids: {[key:string]: number[]} = {};
     const healDurations: number[] = [];
 
     for (const target of targets) {
-        ns.tprint(`Starting heal on ${target}, with ${weakenThreads} weaken threads and ${growThreads} grow threads`);
+        const growthPct = 1 - (ns.getServerMoneyAvailable(target) / ns.getServerMaxMoney(target));
+        const growThreads = Math.ceil(ns.growthAnalyze(target, 1 + growthPct));
+        const weakenThreads = Math.ceil(ns.growthAnalyzeSecurity(growThreads, target));
+
+        const growRam = growThreads * growScriptRam;
+        const weakenRam = weakenThreads * weakenScriptRam;
+
+        if (growRam + weakenRam > availableRam) {
+            ns.tprint(`Not enough ram to start heal on ${target}, skipping`);
+            break; // Not enough ram to start heal on this server, skip it. 
+        }
+
+        ns.tprint(`Starting heal on ${target}, with ${weakenThreads} weaken threads (${formatRAM(weakenRam)}) and ${growThreads} grow threads (${formatRAM(growRam)}). Target: ${formatPct(1 + growthPct)}`);
 
         pids[target] =  [
-            ns.exec(weakenFile, "home", weakenThreads, target),
-            ns.exec(growFile, "home", growThreads, target),
+            ns.exec(weakenFile, host, weakenThreads, target),
+            ns.exec(growFile, host, growThreads, target),
         ];
 
-        healDurations.push(ns.getGrowTime(target));
+        // Weaken is the longer time
+        healDurations.push(ns.getWeakenTime(target));
     }
 
     while (Object.keys(pids).length) {

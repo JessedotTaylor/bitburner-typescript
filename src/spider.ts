@@ -21,6 +21,9 @@ interface IServerData {
 }
 /**
  * Objective: To get a list of hackable servers, sorted by 'rank', and a list of hacked servers we can use as hosts
+ * TODO:
+ * - Add process to copy .lit and coding contracts to the home server (If they're not already there; Notify user)
+ * - Automatically backdoor?
  */
 export async function main(ns: NS) {
     const maxDepth = validateArg<number>(ns, ns.args[0] || 1, 'number');

@@ -1,11 +1,11 @@
 import { NS, RunningScript } from '@ns';
-import { formatCurrency, validateArg, formatMilliseconds, formatRAM } from 'utils/utils';
+import { formatCurrency, validateArg, formatMilliseconds, formatRAM, formatPct } from 'utils/utils';
 import { getServerMoneyString, getServerSecurityLevelString } from '/utils/dashboard';
 import { Dialog } from '/utils/Dialog';
 import { copyScriptToServer } from '/utils/file';
 import { Averager } from 'utils/Averager';
 import { getNextAvailablePort } from '/utils/portAlloc';
-import { CustomLogger } from '../utils/customLogger';
+import { CustomLogger } from 'utils/customLogger';
 
 interface ITimestampedMessage<T extends string | number> {
   message: T;
@@ -44,9 +44,7 @@ class Scheduler {
   timer = 0;
   timeAtLastAdjust = 0;
   
-  // Constants
-  readonly RAM_LIMIT: number;
-  
+  // Constants 
   readonly ESTIMATION_LOWER_BOUND = 0.70;
   readonly ESTIMATION_UPPER_BOUND = 0.90;
 
@@ -186,11 +184,11 @@ class Scheduler {
   }
 
   get utilizationLowerBound(): number {
-    return this.RAM_LIMIT * this.ESTIMATION_LOWER_BOUND;
+    return this.hostAvailableRam * this.ESTIMATION_LOWER_BOUND;
   }
 
   get utilizationUpperBound(): number {
-    return this.RAM_LIMIT * this.ESTIMATION_UPPER_BOUND;
+    return this.hostAvailableRam * this.ESTIMATION_UPPER_BOUND;
   }
   
   
@@ -200,9 +198,10 @@ class Scheduler {
     protected ns: NS,
     protected target: string,
     protected host: string,
-    protected dialog: Dialog
+    protected dialog: Dialog,
+    logLevel: 'ERROR' | 'WARN' | 'INFO' | 'DEBUG' = 'WARN',
   ) {
-    this.logger = new CustomLogger(ns, 'INFO', ns.tprint);
+    this.logger = new CustomLogger(ns, logLevel, ns.tprint);
 
     const selfScript = ns.getRunningScript();
     this.HACK_PORT = getNextAvailablePort(ns, selfScript!.pid);
@@ -223,8 +222,6 @@ class Scheduler {
       copyScriptToServer(ns, host, script);
       this.scriptPids[script] = [];
     });
-    
-    this.RAM_LIMIT = ns.getServerMaxRam(host) - ns.getServerUsedRam(host);
     
     this.timeS[HACK_FILE] = this.hackTimeS;
     this.timeS[GROW_FILE] = this.growTimeS;
@@ -248,7 +245,7 @@ class Scheduler {
     let loopLimiter = 0;
     while (this.totalRamSum < this.utilizationLowerBound || this.totalRamSum > this.utilizationUpperBound) {
       if (loopLimiter > 100) {
-        this.logger.error(`Memory solver couldn't find solution in 100 iterations. Quitting solver!`);
+        this.logger.warn(`Memory solver couldn't find solution in 100 iterations. Quitting solver!`);
         // ns.exit();
         break;
       } else {
@@ -269,7 +266,7 @@ class Scheduler {
       this.calculateRamUsage();
     }
     
-    this.logger.debug(`threads on start: hack: ${this.hackThreads.average} grow: ${this.growThreads.average} weaken: ${this.weakenThreads.average} RAM: ${formatRAM(this.totalRamSum)} ${formatPct(this.totalRamSum / this.RAM_LIMIT)}`);
+    this.logger.debug(`threads on start: hack: ${this.hackThreads.average} grow: ${this.growThreads.average} weaken: ${this.weakenThreads.average} RAM: ${formatRAM(this.totalRamSum)} ${formatPct(this.totalRamSum / this.hostAvailableRam)}`);
     
     let lastMessage: ITimestampedMessage<string> = {
       message: '',
@@ -356,12 +353,12 @@ class Scheduler {
   }
     
   private checkIfShouldAdjustMultiplers() {
-    const scriptRamLessThanAllocated = (this.totalRamSum / this.RAM_LIMIT) < this.ESTIMATION_LOWER_BOUND;
+    const scriptRamLessThanAllocated = (this.totalRamSum / this.hostAvailableRam) < this.ESTIMATION_LOWER_BOUND;
     const hostHasRamAvailable = this.hostAvailableRamPct > this.ESTIMATION_LOWER_BOUND;
 
     const longEnoughSinceLastAdjustment = (this.timer - this.timeAtLastAdjust) > this.growTimeS;
 
-    const scriptRamOverAllocation = (this.totalRamSum / this.RAM_LIMIT) > this.ESTIMATION_UPPER_BOUND;
+    const scriptRamOverAllocation = (this.totalRamSum / this.hostAvailableRam) > this.ESTIMATION_UPPER_BOUND;
     const hostOutOfRam = this.hostAvailableRamPct < .1;
 
     if (
@@ -383,18 +380,27 @@ class Scheduler {
   }
 
   private adjustMultipliers() {
-    const multi = this.totalRamSum < this.RAM_LIMIT ? 1 : -1;
+    const multi = this.totalRamSum < this.hostAvailableRam ? 1 : -1;
 
     if (this.secondsPerGrow > 2 && this.secondsPerWeaken > 2 || this.hackDurationMultiplier > 1) {
       this.hackDurationMultiplier += this.hackDurationMultiplier * ((this.totalRamSum - (this.utilizationUpperBound / 2)) / this.totalRamSum) * 0.01 ;
+
+      if (this.hackDurationMultiplier >= 0.01) {
+        this.logger.error(`HackDurationMultipler below 0.01x. Quitting\nTarget: ${this.target} Host:${this.host}`);
+        this.ns.exit();
+      }
     } else {
       this.logger.debug(`Can't lower secondsPerGrow or secondsPerWeaken. Tweaking Hack % (Currently: ${formatPct(this.hackTargetPerc)})`);
 
       this.hackTargetPerc += 0.0015 * multi;
 
       if (this.hackTargetPerc < 0.001) {
-        this.logger.error(`Hack target % below 0.1%. Quitting`);
+        this.logger.error(`Hack target % below 0.1%. Quitting\nTarget: ${this.target} Host:${this.host}`);
         this.ns.exit();
+      }
+      if (this.hackTargetPerc >= 0.5) {
+        this.logger.info(`Hack target % can't go above 50%. No modifications possible`);
+        this.hackTargetPerc = 0.5;
       }
     }
   }
@@ -444,7 +450,7 @@ class Scheduler {
     this.dialog.addRow('Act. Times:', `h: ${formatMilliseconds(this.ns.getHackTime(this.target))} / g: ${formatMilliseconds(this.ns.getGrowTime(this.target))} / w: ${formatMilliseconds(this.ns.getWeakenTime(this.target))}`);
     this.dialog.addRow('Est. $ / sec:', `${formatCurrency(this.hackTargetDollars / this.secondsPerHack)}`);
     this.dialog.addRow('Est Threads:', `h: ${this.totalHackThreads.toFixed(0)} (${this.hackInstances.toFixed(0)}) / g: ${this.totalGrowThreads.toFixed(0)} (${this.growInstances.toFixed(0)}) / w: ${this.totalWeakenThreads.toFixed(0)} (${this.weakenInstances.toFixed(0)})`);
-    this.dialog.addRow('Est RAM:', `h: ${formatRAM(this.totalHackRam)}/g: ${formatRAM(this.totalGrowRam)}/w: ${formatRAM(this.totalWeakenRam)} [${formatPct(this.totalRamSum / this.RAM_LIMIT, 3)}]`);
+    this.dialog.addRow('Est RAM:', `h: ${formatRAM(this.totalHackRam)}/g: ${formatRAM(this.totalGrowRam)}/w: ${formatRAM(this.totalWeakenRam)} [${formatPct(this.totalRamSum / this.hostAvailableRam, 3)}]`);
     this.dialog.addRow('');
     this.dialog.addRow('Act. Threads:', this.formatActualThreads(runningScripts));
     this.dialog.addRow('Act. RAM:', this.formatActualRam(actualScriptRam));
@@ -600,7 +606,7 @@ class Scheduler {
     let its = 0;
     while (estThreads != avgThreads && avgThreads > 0) {
       if (its > 100) {
-        this.logger.warn(`Grow threads not converging, est: ${estThreads} threads | avg: ${avgThreads} threads | est ${formatPct(estGrowthTarget, 5)} | live: ${formatPct(this.growthTarget, 5)}`);
+        this.logger.info(`${this.host} Grow threads not converging, est: ${estThreads} threads | avg: ${avgThreads} threads | est ${formatPct(estGrowthTarget, 5)} | live: ${formatPct(this.growthTarget, 5)}`);
         break;
       }
 
@@ -616,7 +622,7 @@ class Scheduler {
     }
 
     
-    const averagedData = `${formatPct(estGrowthTarget, 3)} - ${avgThreads.toFixed(0)} threads`;
+    const averagedData = `${formatPct(estGrowthTarget, 3)}${its > 100 ? '!': ''} - ${avgThreads.toFixed(0)} threads`;
     if (liveData === averagedData) {
       return averagedData;
     }
@@ -691,17 +697,15 @@ function loopOverScriptFiles(func: (script: string) => void) {
 } 
 
 
-function formatPct(pct: number, precision: number = 3): string {
-  return `${(pct * 100).toPrecision(precision)}%`
-}
-
-
 export async function main(ns:NS) {
   const {target, host } = validateArgs(ns);
+  const opts = ns.flags([
+    ['logLevel', 'WARN']
+  ])
   
   const dialog = new Dialog(ns);
 
-  const scheduler = new Scheduler(ns, target, host, dialog);
+  const scheduler = new Scheduler(ns, target, host, dialog, opts.logLevel as 'ERROR' | 'WARN' | 'INFO' | 'DEBUG');
 
   await scheduler.main();
 }

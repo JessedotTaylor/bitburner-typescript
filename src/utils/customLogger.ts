@@ -37,15 +37,15 @@ export class CustomLogger {
   private isLevelAboveLogLevel(level: string): boolean {
     switch (level) {
       case 'DEBUG': 
-        return this.logLevel == 'DEBUG' || this.logLevel == 'INFO' || this.logLevel == 'WARN' || this.logLevel == 'ERROR';
+        return this.logLevel == 'DEBUG';
       case 'INFO': 
-        return this.logLevel == 'INFO' || this.logLevel == 'WARN' || this.logLevel == 'ERROR';
+        return this.logLevel == 'DEBUG' || this.logLevel == 'INFO';
       case 'WARN': 
-        return this.logLevel == 'WARN' || this.logLevel == 'ERROR';
+        return  this.logLevel == 'DEBUG' || this.logLevel == 'INFO' || this.logLevel == 'WARN';
       case 'ERROR': 
-        return this.logLevel == 'ERROR';
+        return  this.logLevel == 'DEBUG' || this.logLevel == 'INFO' || this.logLevel == 'WARN' || this.logLevel == 'ERROR';
       default:
-        return this.logLevel == 'INFO' || this.logLevel == 'WARN' || this.logLevel == 'ERROR';
+        return this.logLevel == 'DEBUG' || this.logLevel == 'INFO' ;
     }
   }
 }
